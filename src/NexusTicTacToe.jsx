@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Zap, Users, Bot, RotateCw, Settings, Trophy } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Zap, Users, Bot, RotateCw, Settings, Trophy, Sun, Moon } from 'lucide-react';
 
 // AI Engine Class
 class AIEngine {
@@ -186,10 +186,31 @@ export default function NexusTicTacToe() {
   const [aiDifficulty, setAiDifficulty] = useState(() => loadFromLocalStorage('aiDifficulty', 'medium'));
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiEngine] = useState(() => new AIEngine(loadFromLocalStorage('aiDifficulty', 'medium')));
+  // Starting player option: 'p1' | 'p2' | 'alternate' | 'random'
+  const [startOption, setStartOption] = useState(() => loadFromLocalStorage('startOption', 'alternate'));
+  // Track who started last to support alternate mode: 'p1' | 'p2'
+  const [lastStarter, setLastStarter] = useState('p2');
+  // In AI mode, choose which side the human plays: 'player1' | 'player2'
+  const [aiHumanSide, setAiHumanSide] = useState('player1');
+  // Theme mode: 'dark' | 'light'
+  const [theme, setTheme] = useState(() => loadFromLocalStorage('theme', 'dark'));
 
   useEffect(() => {
-    initializeBoard();
-  }, [gridSize]);
+    const newBoard = Array(gridSize).fill(null).map(() => Array(gridSize).fill(''));
+    setBoard(newBoard);
+    let starter = startOption;
+    if (startOption === 'alternate') {
+      starter = lastStarter === 'p1' ? 'p2' : 'p1';
+    } else if (startOption === 'random') {
+      starter = Math.random() < 0.5 ? 'p1' : 'p2';
+    }
+    const startingSymbol = starter === 'p1' ? player1.symbol : player2.symbol;
+    setCurrentPlayer(startingSymbol);
+    const aiSymbol = aiHumanSide === 'player1' ? player2.symbol : player1.symbol;
+    if (gameMode === 'pvc' && startingSymbol === aiSymbol) {
+      setTimeout(() => makeAiMove(), 100);
+    }
+  }, [gridSize, gameMode, startOption, lastStarter, aiHumanSide, player1.symbol, player2.symbol]);
 
   // Save player1 to localStorage whenever it changes
   useEffect(() => {
@@ -218,54 +239,129 @@ export default function NexusTicTacToe() {
     }
   }, [aiDifficulty]);
 
+  // Save starting option to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('startOption', JSON.stringify(startOption));
+    } catch (error) {
+      console.error('Error saving startOption to localStorage:', error);
+    }
+  }, [startOption]);
+
+  // Save theme to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('theme', JSON.stringify(theme));
+    } catch (error) {
+      console.error('Error saving theme to localStorage:', error);
+    }
+  }, [theme]);
+
   useEffect(() => {
     aiEngine.difficulty = aiDifficulty;
   }, [aiDifficulty, aiEngine]);
 
-  useEffect(() => {
-    if (gameMode === 'pvc' && currentPlayer === player2.symbol && !gameOver && !isAiThinking) {
-      makeAiMove();
-    }
-  }, [currentPlayer, gameMode, gameOver]);
+  // Removed AI turn effect; AI is scheduled after moves and at new game when needed.
 
-  const initializeBoard = () => {
-    const newBoard = Array(gridSize).fill().map(() => Array(gridSize).fill(''));
-    setBoard(newBoard);
-  };
+  // board is reinitialized when gridSize changes via useEffect above
 
-  const makeAiMove = useCallback(() => {
+  const makeAiMove = () => {
+    // Guard clauses - don't check currentPlayer here since state might not have settled
+    if (gameMode !== 'pvc' || gameOver || isAiThinking) return;
+    
+    // Determine AI symbol based on which side the human chose
+    const aiSymbol = aiHumanSide === 'player1' ? player2.symbol : player1.symbol;
+    const humanSymbol = aiHumanSide === 'player1' ? player1.symbol : player2.symbol;
+    
     setIsAiThinking(true);
     const thinkingTime = aiDifficulty === 'hard' ? 1200 : aiDifficulty === 'medium' ? 800 : 400;
-
+    
     setTimeout(() => {
-      const aiMove = aiEngine.makeMove(board, player2.symbol, player1.symbol, gridSize, winCondition);
-      if (aiMove) {
-        const [row, col] = aiMove;
-        handleCellClick(row, col);
-      }
-      setIsAiThinking(false);
+      // Use CURRENT board state from the closure (React will have the latest)
+      // Don't capture before setTimeout - we want the board AFTER human's move
+      setBoard(currentBoard => {
+        const aiMove = aiEngine.makeMove(currentBoard, aiSymbol, humanSymbol, gridSize, winCondition);
+        if (aiMove) {
+          const [row, col] = aiMove;
+          
+          // Make sure the cell is empty
+          if (currentBoard[row][col]) {
+            setIsAiThinking(false);
+            return currentBoard; // Don't modify board
+          }
+          
+          // Create new board with AI's move
+          const newBoard = currentBoard.map(r => [...r]);
+          newBoard[row][col] = aiSymbol;
+          
+          // Check for win
+          const winResult = checkWin(newBoard, row, col);
+          if (winResult.win) {
+            handleWin(winResult.cells, aiSymbol);
+            setIsAiThinking(false);
+            setGameOver(true);
+            return newBoard;
+          }
+          
+          // Check for draw
+          if (checkDraw(newBoard)) {
+            handleDraw();
+            setIsAiThinking(false);
+            return newBoard;
+          }
+          
+          // Switch turn to human
+          const nextPlayerSymbol = aiSymbol === player1.symbol ? player2.symbol : player1.symbol;
+          setCurrentPlayer(nextPlayerSymbol);
+          setIsAiThinking(false);
+          
+          return newBoard;
+        } else {
+          setIsAiThinking(false);
+          return currentBoard;
+        }
+      });
     }, thinkingTime);
-  }, [board, player1.symbol, player2.symbol, gridSize, winCondition, aiDifficulty, aiEngine]);
+  };
 
   const handleCellClick = (row, col) => {
-    if (gameOver || board[row][col] || isAiThinking) return;
-
+    // Only handle human clicks now - AI handles itself in makeAiMove
+    if (gameOver || board[row][col]) return;
+    
+    // Strict turn enforcement for human player
+    if (gameMode === 'pvc') {
+      if (isAiThinking) return; // Block human clicks while AI is thinking
+      const aiSymbol = aiHumanSide === 'player1' ? player2.symbol : player1.symbol;
+      if (currentPlayer === aiSymbol) return; // Human can't play on AI turn
+    }
+    
+    // Update the board with human's move
     const newBoard = board.map(r => [...r]);
     newBoard[row][col] = currentPlayer;
     setBoard(newBoard);
 
+    // Check for win with the symbol that was just placed
     const winResult = checkWin(newBoard, row, col);
     if (winResult.win) {
-      handleWin(winResult.cells);
+      handleWin(winResult.cells, currentPlayer); // Pass the winning symbol
       return;
     }
 
+    // Check for draw
     if (checkDraw(newBoard)) {
       handleDraw();
       return;
     }
 
-    setCurrentPlayer(currentPlayer === player1.symbol ? player2.symbol : player1.symbol);
+    // Calculate next player's symbol
+    const nextPlayerSymbol = currentPlayer === player1.symbol ? player2.symbol : player1.symbol;
+    setCurrentPlayer(nextPlayerSymbol);
+    
+    // If next turn is AI, schedule AI move
+    const aiSymbol = aiHumanSide === 'player1' ? player2.symbol : player1.symbol;
+    if (gameMode === 'pvc' && nextPlayerSymbol === aiSymbol) {
+      setTimeout(() => makeAiMove(), 100);
+    }
   };
 
   const checkWin = (boardState, row, col) => {
@@ -305,12 +401,12 @@ export default function NexusTicTacToe() {
     return boardState.every(row => row.every(cell => cell !== ''));
   };
 
-  const handleWin = (cells) => {
+  const handleWin = (cells, winningSymbol) => {
     setGameOver(true);
-    setWinner(currentPlayer);
+    setWinner(winningSymbol); // Use the explicit winning symbol
     setWinningCells(cells);
 
-    if (currentPlayer === player1.symbol) {
+    if (winningSymbol === player1.symbol) {
       setPlayer1(prev => ({ ...prev, score: prev.score + 1, games: prev.games + 1 }));
       setPlayer2(prev => ({ ...prev, games: prev.games + 1 }));
     } else {
@@ -330,13 +426,31 @@ export default function NexusTicTacToe() {
   };
 
   const newGame = () => {
-    initializeBoard();
-    setCurrentPlayer(player1.symbol);
+    const newBoard = Array(gridSize).fill(null).map(() => Array(gridSize).fill(''));
+    setBoard(newBoard);
+    // Determine starting player based on selected option
+    let starter = startOption;
+    if (startOption === 'alternate') {
+      starter = lastStarter === 'p1' ? 'p2' : 'p1';
+      setLastStarter(starter);
+    } else if (startOption === 'random') {
+      starter = Math.random() < 0.5 ? 'p1' : 'p2';
+      setLastStarter(starter);
+    } else {
+      setLastStarter(startOption);
+    }
+    const startingSymbol = starter === 'p1' ? player1.symbol : player2.symbol;
+    setCurrentPlayer(startingSymbol);
     setGameOver(false);
     setWinner(null);
     setWinningCells([]);
     setShowEndModal(false);
     setIsAiThinking(false);
+    // If AI should start, schedule its move
+    const aiSymbol = aiHumanSide === 'player1' ? player2.symbol : player1.symbol;
+    if (gameMode === 'pvc' && startingSymbol === aiSymbol) {
+      setTimeout(() => makeAiMove(), 100);
+    }
   };
 
   const resetScores = () => {
@@ -350,10 +464,17 @@ export default function NexusTicTacToe() {
   const switchMode = (mode) => {
     setGameMode(mode);
     if (mode === 'pvc') {
-      setPlayer2(prev => ({ ...prev, name: `AI (${aiDifficulty})` }));
+      // Assign AI name to the AI-controlled player based on human side
+      if (aiHumanSide === 'player1') {
+        setPlayer2(prev => ({ ...prev, name: `AI (${aiDifficulty})` }));
+      } else {
+        setPlayer1(prev => ({ ...prev, name: `AI (${aiDifficulty})` }));
+      }
     } else {
-      // Restore Player 2 name from localStorage or use default
+      // Restore names from localStorage or defaults
+      const savedPlayer1 = loadFromLocalStorage('player1', { symbol: 'X', name: 'Player 1', score: 0, games: 0 });
       const savedPlayer2 = loadFromLocalStorage('player2', { symbol: 'O', name: 'Player 2', score: 0, games: 0 });
+      setPlayer1(prev => ({ ...prev, name: savedPlayer1.name }));
       setPlayer2(prev => ({ ...prev, name: savedPlayer2.name }));
     }
     newGame();
@@ -364,20 +485,40 @@ export default function NexusTicTacToe() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 text-white overflow-hidden relative">
+    <div className={`min-h-screen overflow-hidden relative transition-colors duration-500 ${
+      theme === 'dark' 
+        ? 'bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 text-white' 
+        : 'bg-gradient-to-br from-slate-50 via-purple-50 to-blue-50 text-slate-900'
+    }`}>
       {/* Animated Background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-purple-900/20 via-slate-950 to-slate-950" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent" />
-        <div className="absolute top-1/4 -left-20 w-96 h-96 bg-purple-500/30 rounded-full blur-3xl animate-blob" />
-        <div className="absolute top-1/3 -right-20 w-96 h-96 bg-blue-500/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
-        <div className="absolute bottom-1/4 left-1/3 w-96 h-96 bg-pink-500/30 rounded-full blur-3xl animate-blob animation-delay-4000" />
+        {theme === 'dark' ? (
+          <>
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-purple-900/20 via-slate-950 to-slate-950" />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent" />
+            <div className="absolute top-1/4 -left-20 w-96 h-96 bg-purple-500/30 rounded-full blur-3xl animate-blob" />
+            <div className="absolute top-1/3 -right-20 w-96 h-96 bg-blue-500/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
+            <div className="absolute bottom-1/4 left-1/3 w-96 h-96 bg-pink-500/30 rounded-full blur-3xl animate-blob animation-delay-4000" />
+          </>
+        ) : (
+          <>
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-purple-200/30 via-slate-50 to-blue-50" />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,_var(--tw-gradient-stops))] from-blue-200/30 via-transparent to-transparent" />
+            <div className="absolute top-1/4 -left-20 w-96 h-96 bg-purple-300/40 rounded-full blur-3xl animate-blob" />
+            <div className="absolute top-1/3 -right-20 w-96 h-96 bg-blue-300/40 rounded-full blur-3xl animate-blob animation-delay-2000" />
+            <div className="absolute bottom-1/4 left-1/3 w-96 h-96 bg-pink-300/40 rounded-full blur-3xl animate-blob animation-delay-4000" />
+          </>
+        )}
       </div>
 
       {/* Main Container */}
       <div className="relative z-10 flex flex-col h-screen p-2 sm:p-3 lg:p-4 gap-2 sm:gap-2.5 lg:gap-3 max-w-[2000px] mx-auto">
         {/* Header - Compact on Mobile */}
-        <header className="bg-slate-900/90 backdrop-blur-xl border border-purple-500/40 rounded-xl sm:rounded-2xl p-2 sm:p-3 lg:p-4 shadow-2xl shadow-purple-500/30 hover:shadow-purple-500/40 transition-all">
+        <header className={`backdrop-blur-xl border rounded-xl sm:rounded-2xl p-2 sm:p-3 lg:p-4 shadow-2xl transition-all ${
+          theme === 'dark'
+            ? 'bg-slate-900/90 border-purple-500/40 shadow-purple-500/30 hover:shadow-purple-500/40'
+            : 'bg-white/90 border-purple-300/60 shadow-purple-300/40 hover:shadow-purple-400/50'
+        }`}>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
             <div className="flex items-center justify-center sm:justify-start gap-2 sm:gap-3">
               <div className="bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl shadow-lg shadow-purple-500/50 animate-pulse">
@@ -389,13 +530,17 @@ export default function NexusTicTacToe() {
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-center">
-              <div className="flex bg-slate-800/50 rounded-lg sm:rounded-xl p-0.5 sm:p-1 gap-0.5 sm:gap-1 shadow-inner flex-1 sm:flex-initial min-w-0">
+              <div className={`flex rounded-lg sm:rounded-xl p-0.5 sm:p-1 gap-0.5 sm:gap-1 shadow-inner flex-1 sm:flex-initial min-w-0 ${
+                theme === 'dark' ? 'bg-slate-800/50' : 'bg-slate-200/50'
+              }`}>
                 <button
                   onClick={() => switchMode('pvp')}
                   className={`px-3 sm:px-4 py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-1 sm:gap-1.5 flex-1 sm:flex-initial ${
                     gameMode === 'pvp'
                       ? 'bg-gradient-to-r from-purple-500 to-blue-500 text-white shadow-lg shadow-purple-500/50 scale-105'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                      : theme === 'dark'
+                      ? 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                   }`}
                 >
                   <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -406,7 +551,9 @@ export default function NexusTicTacToe() {
                   className={`px-3 sm:px-4 py-2 rounded-md sm:rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-1 sm:gap-1.5 flex-1 sm:flex-initial ${
                     gameMode === 'pvc'
                       ? 'bg-gradient-to-r from-purple-500 to-blue-500 text-white shadow-lg shadow-purple-500/50 scale-105'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                      : theme === 'dark'
+                      ? 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                   }`}
                 >
                   <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -424,8 +571,28 @@ export default function NexusTicTacToe() {
                 </button>
 
                 <button
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                  className={`px-3 sm:px-4 py-2 border rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold hover:scale-105 transition-all active:scale-95 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/50 hover:border-purple-500/50'
+                      : 'bg-white/50 border-slate-300/50 hover:bg-slate-100/50 hover:border-purple-400/50'
+                  }`}
+                  title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  ) : (
+                    <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  )}
+                </button>
+
+                <button
                   onClick={() => setShowSettings(true)}
-                  className="px-3 sm:px-4 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold hover:bg-slate-700/50 hover:border-purple-500/50 hover:scale-105 transition-all active:scale-95"
+                  className={`px-3 sm:px-4 py-2 border rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold hover:scale-105 transition-all active:scale-95 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/50 hover:border-purple-500/50'
+                      : 'bg-white/50 border-slate-300/50 hover:bg-slate-100/50 hover:border-purple-400/50'
+                  }`}
                 >
                   <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </button>
@@ -435,26 +602,30 @@ export default function NexusTicTacToe() {
         </header>
 
         {/* Game Status - Enhanced Mobile */}
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-purple-500/40 rounded-xl sm:rounded-2xl p-2.5 sm:p-3 shadow-2xl shadow-purple-500/30">
+        <div className={`backdrop-blur-xl border rounded-xl sm:rounded-2xl p-2.5 sm:p-3 shadow-2xl transition-all ${
+          theme === 'dark'
+            ? 'bg-slate-900/90 border-purple-500/40 shadow-purple-500/30'
+            : 'bg-white/90 border-purple-300/60 shadow-purple-300/40'
+        }`}>
           <div className="flex flex-col sm:flex-row items-center sm:items-center justify-between gap-2 text-xs sm:text-sm">
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="relative">
                 <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50" />
                 <div className="absolute inset-0 w-2.5 h-2.5 sm:w-3 sm:h-3 bg-green-400 rounded-full animate-ping opacity-75" />
               </div>
-              <span className="text-slate-300 text-sm sm:text-base font-medium">
+              <span className={`text-sm sm:text-base font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                 <span className="hidden sm:inline">Turn: </span>
                 <strong className="font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
                   {currentPlayer === player1.symbol ? player1.name : player2.name}
                 </strong>
               </span>
             </div>
-            <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm text-slate-400">
-              <span className="bg-slate-800/50 px-2 py-1 rounded-lg font-medium">
+            <div className={`flex items-center gap-2 sm:gap-4 text-xs sm:text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+              <span className={`px-2 py-1 rounded-lg font-medium ${theme === 'dark' ? 'bg-slate-800/50' : 'bg-slate-200/50'}`}>
                 <strong className="text-purple-400">{gridSize}×{gridSize}</strong>
               </span>
               <span className="hidden sm:inline">•</span>
-              <span className="bg-slate-800/50 px-2 py-1 rounded-lg font-medium">
+              <span className={`px-2 py-1 rounded-lg font-medium ${theme === 'dark' ? 'bg-slate-800/50' : 'bg-slate-200/50'}`}>
                 Win: <strong className="text-blue-400">{winCondition}</strong>
               </span>
             </div>
@@ -468,9 +639,13 @@ export default function NexusTicTacToe() {
           <div className="flex items-center justify-center order-1 md:order-2 md:col-span-2 lg:col-span-1 lg:order-2 flex-1 min-h-0 p-2 sm:p-3">
             <div
               className={`
-                bg-gradient-to-br from-slate-900/95 via-purple-900/20 to-slate-900/95 backdrop-blur-xl 
-                border-2 border-purple-500/40 rounded-2xl sm:rounded-3xl shadow-2xl shadow-purple-500/40 
+                backdrop-blur-xl 
+                border-2 rounded-2xl sm:rounded-3xl shadow-2xl
                 w-full h-full 
+                ${theme === 'dark'
+                  ? 'bg-gradient-to-br from-slate-900/95 via-purple-900/20 to-slate-900/95 border-purple-500/40 shadow-purple-500/40'
+                  : 'bg-gradient-to-br from-white/95 via-purple-100/30 to-white/95 border-purple-400/50 shadow-purple-400/50'
+                }
                 ${gridSize >= 8 
                   ? 'max-w-[min(95vw,420px)] max-h-[min(95vw,420px)] md:max-w-[min(85vw,600px)] md:max-h-[min(70vh,600px)] lg:max-w-[min(55vw,750px)] lg:max-h-[min(75vh,750px)]' 
                   : gridSize >= 7 
@@ -499,12 +674,20 @@ export default function NexusTicTacToe() {
                     onClick={() => handleCellClick(rowIndex, colIndex)}
                     disabled={gameOver || cell !== '' || isAiThinking}
                     className={`
-                      bg-slate-800/70 backdrop-blur-sm border flex items-center justify-center font-bold transition-all duration-300
-                      hover:scale-[1.03] hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/50 active:scale-95 active:shadow-inner
-                      ${cell ? 'cursor-default bg-slate-800/90 shadow-lg' : 'cursor-pointer hover:bg-slate-700/70 active:bg-slate-600/70'}
+                      backdrop-blur-sm border flex items-center justify-center font-bold transition-all duration-300
+                      hover:scale-[1.03] active:scale-95 active:shadow-inner
+                      ${theme === 'dark'
+                        ? 'bg-slate-800/70 border-slate-700/50'
+                        : 'bg-white/70 border-slate-300/50'
+                      }
+                      ${cell 
+                        ? `cursor-default shadow-lg ${theme === 'dark' ? 'bg-slate-800/90' : 'bg-white/90'}` 
+                        : `cursor-pointer ${theme === 'dark' ? 'hover:bg-slate-700/70 active:bg-slate-600/70' : 'hover:bg-slate-100/70 active:bg-slate-200/70'}`
+                      }
                       ${isWinningCell(rowIndex, colIndex) 
                         ? 'bg-gradient-to-br from-green-500 to-emerald-500 border-green-400 animate-pulse shadow-2xl shadow-green-500/70 scale-[1.05] ring-2 ring-green-400/50' 
-                        : 'border-slate-700/50 hover:border-purple-500/70'}
+                        : theme === 'dark' ? 'hover:border-purple-500/70 hover:shadow-lg hover:shadow-purple-500/50' : 'hover:border-purple-400/70 hover:shadow-lg hover:shadow-purple-400/40'
+                      }
                       ${
                         gridSize >= 8 
                           ? 'rounded-md text-sm sm:text-lg md:text-xl lg:text-2xl border-[1px]' 
@@ -537,10 +720,12 @@ export default function NexusTicTacToe() {
           </div>
 
           {/* Player 1 Card - Enhanced Mobile UX */}
-          <div className={`bg-slate-900/90 backdrop-blur-xl border-2 rounded-xl sm:rounded-2xl p-3 sm:p-3 md:p-4 lg:p-6 shadow-2xl transition-all order-2 md:order-1 lg:order-1 ${
+          <div className={`backdrop-blur-xl border-2 rounded-xl sm:rounded-2xl p-3 sm:p-3 md:p-4 lg:p-6 shadow-2xl transition-all order-2 md:order-1 lg:order-1 ${
+            theme === 'dark' ? 'bg-slate-900/90' : 'bg-white/90'
+          } ${
             currentPlayer === player1.symbol && !gameOver
               ? 'border-purple-500 shadow-purple-500/60 ring-2 ring-purple-500/50 bg-purple-500/5'
-              : 'border-purple-500/40'
+              : theme === 'dark' ? 'border-purple-500/40' : 'border-purple-400/50'
           } ${winner === player1.symbol ? 'border-green-500 shadow-green-500/60 ring-4 ring-green-500/50 animate-pulse bg-green-500/10' : ''}`}>
             <div className="flex md:flex-row lg:flex-col items-center gap-3 sm:gap-3 lg:gap-4">
               <div className="relative">
@@ -558,21 +743,26 @@ export default function NexusTicTacToe() {
                   type="text"
                   value={player1.name}
                   onChange={(e) => setPlayer1(prev => ({ ...prev, name: e.target.value }))}
-                  className="bg-slate-800/50 border-2 border-slate-700 rounded-lg px-3 py-1.5 sm:py-2 text-sm sm:text-base md:text-base text-center w-full font-semibold focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 transition-all"
+                  disabled={gameMode === 'pvc' && aiHumanSide === 'player2'}
+                  className={`border-2 rounded-lg px-3 py-1.5 sm:py-2 text-sm sm:text-base md:text-base text-center w-full font-semibold focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50 transition-all ${
+                    theme === 'dark' 
+                      ? 'bg-slate-800/50 border-slate-700 text-white' 
+                      : 'bg-slate-100/50 border-slate-300 text-slate-900'
+                  }`}
                   maxLength={20}
                 />
                 <div className="flex justify-around mt-2 sm:mt-3 gap-2">
-                  <div className="text-center flex-1 bg-slate-800/30 rounded-lg p-2">
+                  <div className={`text-center flex-1 rounded-lg p-2 ${theme === 'dark' ? 'bg-slate-800/30' : 'bg-slate-200/30'}`}>
                     <div className="text-xl sm:text-2xl md:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
                       {player1.score}
                     </div>
-                    <div className="text-[10px] sm:text-xs md:text-xs text-slate-400 uppercase tracking-wider font-medium">Score</div>
+                    <div className={`text-[10px] sm:text-xs md:text-xs uppercase tracking-wider font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Score</div>
                   </div>
-                  <div className="text-center flex-1 bg-slate-800/30 rounded-lg p-2">
+                  <div className={`text-center flex-1 rounded-lg p-2 ${theme === 'dark' ? 'bg-slate-800/30' : 'bg-slate-200/30'}`}>
                     <div className="text-xl sm:text-2xl md:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
                       {player1.games}
                     </div>
-                    <div className="text-[10px] sm:text-xs md:text-xs text-slate-400 uppercase tracking-wider font-medium">Games</div>
+                    <div className={`text-[10px] sm:text-xs md:text-xs uppercase tracking-wider font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Games</div>
                   </div>
                 </div>
                 <div className={`mt-2 sm:mt-3 py-2 sm:py-2 md:py-2 rounded-lg text-xs sm:text-sm md:text-sm font-bold uppercase tracking-wider transition-all shadow-lg ${
@@ -580,7 +770,7 @@ export default function NexusTicTacToe() {
                     ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white animate-pulse shadow-green-500/50'
                     : winner === player1.symbol
                     ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-yellow-500/50'
-                    : 'bg-slate-800/50 text-slate-400'
+                    : theme === 'dark' ? 'bg-slate-800/50 text-slate-400' : 'bg-slate-200/50 text-slate-600'
                 }`}>
                   {winner === player1.symbol ? '🏆 Winner!' : currentPlayer === player1.symbol && !gameOver ? '▶ Your Turn' : 'Waiting...'}
                 </div>
@@ -589,10 +779,12 @@ export default function NexusTicTacToe() {
           </div>
 
           {/* Player 2 Card - Enhanced Mobile UX */}
-          <div className={`bg-slate-900/90 backdrop-blur-xl border-2 rounded-xl sm:rounded-2xl p-3 sm:p-3 md:p-4 lg:p-6 shadow-2xl transition-all order-3 md:order-3 lg:order-3 ${
+          <div className={`backdrop-blur-xl border-2 rounded-xl sm:rounded-2xl p-3 sm:p-3 md:p-4 lg:p-6 shadow-2xl transition-all order-3 md:order-3 lg:order-3 overflow-hidden ${
+            theme === 'dark' ? 'bg-slate-900/90' : 'bg-white/90'
+          } ${
             currentPlayer === player2.symbol && !gameOver
               ? 'border-pink-500 shadow-pink-500/60 ring-2 ring-pink-500/50 bg-pink-500/5'
-              : 'border-pink-500/40'
+              : theme === 'dark' ? 'border-pink-500/40' : 'border-pink-400/50'
           } ${winner === player2.symbol ? 'border-green-500 shadow-green-500/60 ring-4 ring-green-500/50 animate-pulse bg-green-500/10' : ''}`}>
             <div className="flex md:flex-row lg:flex-col items-center gap-3 sm:gap-3 lg:gap-4">
               <div className="relative">
@@ -610,22 +802,26 @@ export default function NexusTicTacToe() {
                   type="text"
                   value={player2.name}
                   onChange={(e) => setPlayer2(prev => ({ ...prev, name: e.target.value }))}
-                  disabled={gameMode === 'pvc'}
-                  className="bg-slate-800/50 border-2 border-slate-700 rounded-lg px-3 py-1.5 sm:py-2 text-sm sm:text-base md:text-base text-center w-full font-semibold focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 disabled:opacity-50 transition-all"
+                  disabled={gameMode === 'pvc' && aiHumanSide === 'player1'}
+                  className={`border-2 rounded-lg px-3 py-1.5 sm:py-2 text-sm sm:text-base md:text-base text-center w-full font-semibold focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/50 disabled:opacity-50 transition-all ${
+                    theme === 'dark' 
+                      ? 'bg-slate-800/50 border-slate-700 text-white' 
+                      : 'bg-slate-100/50 border-slate-300 text-slate-900'
+                  }`}
                   maxLength={20}
                 />
                 <div className="flex justify-around mt-2 sm:mt-3 gap-2">
-                  <div className="text-center flex-1 bg-slate-800/30 rounded-lg p-2">
+                  <div className={`text-center flex-1 rounded-lg p-2 ${theme === 'dark' ? 'bg-slate-800/30' : 'bg-slate-200/30'}`}>
                     <div className="text-xl sm:text-2xl md:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-pink-400 to-rose-400 bg-clip-text text-transparent">
                       {player2.score}
                     </div>
-                    <div className="text-[10px] sm:text-xs md:text-xs text-slate-400 uppercase tracking-wider font-medium">Score</div>
+                    <div className={`text-[10px] sm:text-xs md:text-xs uppercase tracking-wider font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Score</div>
                   </div>
-                  <div className="text-center flex-1 bg-slate-800/30 rounded-lg p-2">
+                  <div className={`text-center flex-1 rounded-lg p-2 ${theme === 'dark' ? 'bg-slate-800/30' : 'bg-slate-200/30'}`}>
                     <div className="text-xl sm:text-2xl md:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-pink-400 to-rose-400 bg-clip-text text-transparent">
                       {player2.games}
                     </div>
-                    <div className="text-[10px] sm:text-xs md:text-xs text-slate-400 uppercase tracking-wider font-medium">Games</div>
+                    <div className={`text-[10px] sm:text-xs md:text-xs uppercase tracking-wider font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Games</div>
                   </div>
                 </div>
                 <div className={`mt-2 sm:mt-3 py-2 sm:py-2 md:py-2 rounded-lg text-xs sm:text-sm md:text-sm font-bold uppercase tracking-wider transition-all shadow-lg ${
@@ -633,13 +829,24 @@ export default function NexusTicTacToe() {
                     ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white animate-pulse shadow-green-500/50'
                     : winner === player2.symbol
                     ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-yellow-500/50'
-                    : 'bg-slate-800/50 text-slate-400'
+                    : theme === 'dark' ? 'bg-slate-800/50 text-slate-400' : 'bg-slate-200/50 text-slate-600'
                 }`}>
                   {winner === player2.symbol ? '🏆 Winner!' : currentPlayer === player2.symbol && !gameOver ? (isAiThinking ? '🤔 Thinking...' : '▶ Your Turn') : 'Waiting...'}
                 </div>
                 {gameMode === 'pvc' && (
-                  <div className="mt-2 py-1.5 px-3 bg-blue-500/20 border border-blue-500/30 rounded-lg text-xs sm:text-xs text-blue-300 font-medium">
-                    🤖 AI: {aiDifficulty.charAt(0).toUpperCase() + aiDifficulty.slice(1)}
+                  <div className={`mt-2 py-1.5 px-2 sm:px-3 border rounded-lg text-[10px] sm:text-xs font-medium text-center w-full overflow-hidden ${
+                    theme === 'dark'
+                      ? 'bg-blue-500/20 border-blue-500/30 text-blue-300'
+                      : 'bg-blue-100/50 border-blue-400/30 text-blue-700'
+                  }`}>
+                    {/* Mobile: Compact version */}
+                    <div className="md:hidden truncate">
+                      🤖 {aiDifficulty.charAt(0).toUpperCase() + aiDifficulty.slice(1)} • P{aiHumanSide === 'player1' ? '1' : '2'}
+                    </div>
+                    {/* Desktop: Full version */}
+                    <div className="hidden md:block truncate">
+                      🤖 AI: {aiDifficulty.charAt(0).toUpperCase() + aiDifficulty.slice(1)} • You are {aiHumanSide === 'player1' ? 'Player 1' : 'Player 2'}
+                    </div>
                   </div>
                 )}
               </div>
@@ -648,10 +855,14 @@ export default function NexusTicTacToe() {
         </div>
 
         {/* Footer */}
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-purple-500/40 rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-2xl shadow-purple-500/30 flex justify-center">
+        <div className={`backdrop-blur-xl border rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-2xl flex justify-center transition-all ${
+          theme === 'dark'
+            ? 'bg-slate-900/90 border-purple-500/40 shadow-purple-500/30'
+            : 'bg-white/90 border-purple-300/60 shadow-purple-300/40'
+        }`}>
           <button
             onClick={resetScores}
-            className="px-3 sm:px-6 py-1.5 sm:py-2.5 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-lg sm:rounded-xl text-xs sm:text-base font-semibold hover:shadow-lg hover:shadow-red-500/50 hover:scale-105 transition-all flex items-center gap-1.5 sm:gap-2"
+            className="px-3 sm:px-6 py-1.5 sm:py-2.5 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-lg sm:rounded-xl text-xs sm:text-base font-semibold hover:shadow-lg hover:shadow-red-500/50 hover:scale-105 transition-all flex items-center gap-1.5 sm:gap-2 text-white"
           >
             <Trophy className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
             Reset Scores
@@ -662,14 +873,22 @@ export default function NexusTicTacToe() {
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowSettings(false)}>
-          <div className="bg-slate-900 border border-purple-500/50 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className={`border rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl ${
+            theme === 'dark'
+              ? 'bg-slate-900 border-purple-500/50'
+              : 'bg-white border-purple-400/50'
+          }`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
                 Game Settings
               </h2>
               <button
                 onClick={() => setShowSettings(false)}
-                className="text-slate-400 hover:text-white text-2xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 transition-all"
+                className={`text-2xl w-8 h-8 flex items-center justify-center rounded-lg transition-all ${
+                  theme === 'dark'
+                    ? 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
               >
                 ×
               </button>
@@ -677,7 +896,7 @@ export default function NexusTicTacToe() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Grid Size
                 </label>
                 <select
@@ -687,7 +906,11 @@ export default function NexusTicTacToe() {
                     setGridSize(size);
                     if (winCondition > size) setWinCondition(size);
                   }}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50"
+                  className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 border-slate-700 text-white'
+                      : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
                 >
                   {[3, 4, 5, 6, 7, 8].map(size => (
                     <option key={size} value={size}>{size}×{size}</option>
@@ -696,13 +919,17 @@ export default function NexusTicTacToe() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Win Condition
                 </label>
                 <select
                   value={winCondition}
                   onChange={(e) => setWinCondition(parseInt(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50"
+                  className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 border-slate-700 text-white'
+                      : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
                 >
                   {Array.from({ length: gridSize - 2 }, (_, i) => i + 3).map(num => (
                     <option key={num} value={num}>{num} in a row</option>
@@ -711,13 +938,17 @@ export default function NexusTicTacToe() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Player 1 Symbol
                 </label>
                 <select
                   value={player1.symbol}
                   onChange={(e) => setPlayer1(prev => ({ ...prev, symbol: e.target.value }))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50"
+                  className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 border-slate-700 text-white'
+                      : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
                 >
                   {['X', 'O', '★', '♦', '●', '■', '🔥', '⚡', '💎', '🚀'].map(symbol => (
                     <option key={symbol} value={symbol}>{symbol}</option>
@@ -726,13 +957,17 @@ export default function NexusTicTacToe() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Player 2 Symbol
                 </label>
                 <select
                   value={player2.symbol}
                   onChange={(e) => setPlayer2(prev => ({ ...prev, symbol: e.target.value }))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50"
+                  className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 border-slate-700 text-white'
+                      : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
                 >
                   {['O', 'X', '★', '♦', '●', '■', '🌟', '💫', '🎯', '🔮'].map(symbol => (
                     <option key={symbol} value={symbol}>{symbol}</option>
@@ -740,22 +975,85 @@ export default function NexusTicTacToe() {
                 </select>
               </div>
 
+              <div>
+                <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Starting Player
+                </label>
+                <select
+                  value={startOption}
+                  onChange={(e) => setStartOption(e.target.value)}
+                  className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                    theme === 'dark'
+                      ? 'bg-slate-800 border-slate-700 text-white'
+                      : 'bg-slate-100 border-slate-300 text-slate-900'
+                  }`}
+                >
+                  <option value="p1">Player 1 starts</option>
+                  <option value="p2">Player 2 starts</option>
+                  <option value="alternate">Alternate each game (X then O)</option>
+                  <option value="random">Random each game</option>
+                </select>
+              </div>
+
               {gameMode === 'pvc' && (
                 <div>
-                  <label className="block text-sm font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+                  <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                     AI Difficulty
                   </label>
                   <select
                     value={aiDifficulty}
                     onChange={(e) => {
                       setAiDifficulty(e.target.value);
-                      setPlayer2(prev => ({ ...prev, name: `AI (${e.target.value})` }));
+                      if (aiHumanSide === 'player1') {
+                        setPlayer2(prev => ({ ...prev, name: `AI (${e.target.value})` }));
+                      } else {
+                        setPlayer1(prev => ({ ...prev, name: `AI (${e.target.value})` }));
+                      }
                     }}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50"
+                    className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                      theme === 'dark'
+                        ? 'bg-slate-800 border-slate-700 text-white'
+                        : 'bg-slate-100 border-slate-300 text-slate-900'
+                    }`}
                   >
                     <option value="easy">Easy - Random moves</option>
                     <option value="medium">Medium - Smart strategy</option>
                     <option value="hard">Hard - Minimax algorithm</option>
+                  </select>
+                </div>
+              )}
+
+              {gameMode === 'pvc' && (
+                <div>
+                  <label className={`block text-sm font-semibold mb-2 uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                    You Play As
+                  </label>
+                  <select
+                    value={aiHumanSide}
+                    onChange={(e) => {
+                      const newSide = e.target.value;
+                      setAiHumanSide(newSide);
+                      // Update which player shows AI name
+                      if (newSide === 'player1') {
+                        // AI becomes Player 2
+                        setPlayer2(prev => ({ ...prev, name: `AI (${aiDifficulty})` }));
+                        const savedP1 = loadFromLocalStorage('player1', { symbol: 'X', name: 'Player 1', score: 0, games: 0 });
+                        setPlayer1(prev => ({ ...prev, name: savedP1.name }));
+                      } else {
+                        // AI becomes Player 1
+                        setPlayer1(prev => ({ ...prev, name: `AI (${aiDifficulty})` }));
+                        const savedP2 = loadFromLocalStorage('player2', { symbol: 'O', name: 'Player 2', score: 0, games: 0 });
+                        setPlayer2(prev => ({ ...prev, name: savedP2.name }));
+                      }
+                    }}
+                    className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 ${
+                      theme === 'dark'
+                        ? 'bg-slate-800 border-slate-700 text-white'
+                        : 'bg-slate-100 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="player1">Player 1</option>
+                    <option value="player2">Player 2</option>
                   </select>
                 </div>
               )}
@@ -771,7 +1069,7 @@ export default function NexusTicTacToe() {
                   setShowSettings(false);
                   newGame();
                 }}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-xl font-semibold hover:shadow-lg hover:shadow-purple-500/50 transition-all"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-xl font-semibold hover:shadow-lg hover:shadow-purple-500/50 transition-all text-white"
               >
                 Apply Settings
               </button>
@@ -783,7 +1081,11 @@ export default function NexusTicTacToe() {
       {/* Game End Modal */}
       {showEndModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowEndModal(false)}>
-          <div className="bg-slate-900 border border-purple-500/50 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className={`border rounded-2xl p-8 max-w-md w-full text-center shadow-2xl ${
+            theme === 'dark'
+              ? 'bg-slate-900 border-purple-500/50'
+              : 'bg-white border-purple-400/50'
+          }`} onClick={(e) => e.stopPropagation()}>
             <div className="text-6xl sm:text-7xl mb-4">
               {winner ? '🏆' : '🤝'}
             </div>
@@ -792,7 +1094,7 @@ export default function NexusTicTacToe() {
                 ? `${winner === player1.symbol ? player1.name : player2.name} Wins!`
                 : "It's a Draw!"}
             </h2>
-            <p className="text-slate-400 mb-6">
+            <p className={`mb-6 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
               {winner 
                 ? 'Congratulations on your victory!'
                 : 'Great game! Both players played well.'}
@@ -800,13 +1102,17 @@ export default function NexusTicTacToe() {
             <div className="flex gap-3">
               <button
                 onClick={newGame}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-xl font-semibold hover:shadow-lg hover:shadow-purple-500/50 transition-all"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 rounded-xl font-semibold hover:shadow-lg hover:shadow-purple-500/50 transition-all text-white"
               >
                 Play Again
               </button>
               <button
                 onClick={() => setShowEndModal(false)}
-                className="flex-1 px-6 py-3 bg-slate-800 rounded-xl font-semibold hover:bg-slate-700 transition-all"
+                className={`flex-1 px-6 py-3 rounded-xl font-semibold transition-all ${
+                  theme === 'dark'
+                    ? 'bg-slate-800 hover:bg-slate-700 text-white'
+                    : 'bg-slate-200 hover:bg-slate-300 text-slate-900'
+                }`}
               >
                 Close
               </button>
@@ -815,188 +1121,7 @@ export default function NexusTicTacToe() {
         </div>
       )}
 
-      <style jsx>{`
-        @keyframes blob {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-        @media (max-width: 640px) {
-          .xs\:inline {
-            display: inline;
-          }
-        }
-
-        /* Custom responsive fixes for 801x1014 and 1134x1014 resolutions */
-        @media (min-width: 768px) and (max-width: 1200px) {
-          /* Adjust main container padding for medium screens */
-          .relative.z-10.flex.flex-col.h-screen {
-            padding: 0.75rem;
-            gap: 0.625rem;
-          }
-
-          /* Optimize game board container for medium screens */
-          .flex.items-center.justify-center.order-1 {
-            padding: 0.5rem;
-          }
-
-          /* Adjust player cards to be more compact */
-          .bg-slate-900\/90.backdrop-blur-xl.border-2.rounded-xl {
-            padding: 0.75rem !important;
-          }
-
-          /* Make player symbols slightly smaller */
-          .bg-gradient-to-br.rounded-full.flex.items-center.justify-center {
-            width: 3.5rem !important;
-            height: 3.5rem !important;
-            font-size: 1.75rem !important;
-          }
-
-          /* Adjust player input fields */
-          input[type="text"] {
-            font-size: 0.875rem;
-            padding: 0.5rem;
-          }
-
-          /* Optimize score display */
-          .text-center.flex-1.bg-slate-800\/30.rounded-lg {
-            padding: 0.5rem;
-          }
-
-          /* Adjust header padding */
-          header {
-            padding: 0.625rem !important;
-          }
-
-          /* Optimize button sizes */
-          button {
-            font-size: 0.875rem;
-          }
-        }
-
-        /* Specific fix for 801x1014 (portrait tablet) */
-        @media (min-width: 768px) and (max-width: 850px) and (min-height: 1000px) {
-          /* Force single column layout for game area */
-          .flex-1.flex.flex-col.md\:grid {
-            display: flex !important;
-            flex-direction: column !important;
-          }
-
-          /* Maximize board space */
-          .flex.items-center.justify-center.order-1 > div {
-            max-width: min(92vw, 480px) !important;
-            max-height: min(92vw, 480px) !important;
-          }
-
-          /* Compact player cards horizontally */
-          .bg-slate-900\/90.backdrop-blur-xl.border-2 > div {
-            flex-direction: row !important;
-            gap: 1rem !important;
-          }
-
-          /* Reduce overall padding */
-          .relative.z-10.flex.flex-col.h-screen {
-            padding: 0.5rem;
-            gap: 0.5rem;
-          }
-        }
-
-        /* Specific fix for 1134x1014 (landscape tablet) */
-        @media (min-width: 1100px) and (max-width: 1200px) and (max-height: 1100px) {
-          /* Optimize grid layout */
-          .flex-1.flex.flex-col.md\:grid.lg\:grid-cols-\[minmax\(200px\,1fr\)_auto_minmax\(200px\,1fr\)\] {
-            grid-template-columns: minmax(150px, 0.9fr) auto minmax(150px, 0.9fr) !important;
-            gap: 0.75rem !important;
-          }
-
-          /* Adjust board size for landscape */
-          .flex.items-center.justify-center.order-1 > div {
-            max-width: min(50vw, 600px) !important;
-            max-height: min(65vh, 600px) !important;
-          }
-
-          /* Compact player cards */
-          .bg-slate-900\/90.backdrop-blur-xl.border-2 {
-            padding: 1rem !important;
-          }
-
-          /* Reduce player symbol size */
-          .bg-gradient-to-br.rounded-full.flex.items-center.justify-center {
-            width: 3.25rem !important;
-            height: 3.25rem !important;
-            font-size: 1.5rem !important;
-          }
-
-          /* Optimize vertical spacing */
-          .relative.z-10.flex.flex-col.h-screen {
-            padding: 0.625rem;
-            gap: 0.5rem;
-          }
-
-          /* Compact header */
-          header {
-            padding: 0.5rem !important;
-          }
-
-          header h1 {
-            font-size: 1.125rem !important;
-          }
-
-          /* Smaller buttons */
-          header button {
-            padding: 0.5rem 0.75rem;
-            font-size: 0.813rem;
-          }
-
-          /* Compact footer */
-          footer,
-          .bg-slate-900\/90.backdrop-blur-xl.border.border-purple-500\/40.rounded-xl:last-child {
-            padding: 0.5rem !important;
-          }
-        }
-
-        /* General optimization for medium screens */
-        @media (min-width: 768px) and (max-width: 1024px) {
-          /* Ensure game status bar is compact */
-          .bg-slate-900\/90.backdrop-blur-xl.border.border-purple-500\/40.rounded-xl {
-            padding: 0.625rem !important;
-          }
-
-          /* Optimize cell sizes for different grid sizes */
-          .bg-slate-800\/70.backdrop-blur-sm.border {
-            font-size: clamp(0.875rem, 2vw, 1.5rem);
-          }
-        }
-
-        /* Fix for very specific resolutions to prevent overflow */
-        @media (min-width: 768px) and (max-width: 1200px) and (max-height: 1100px) {
-          /* Prevent main container from overflowing */
-          .relative.z-10.flex.flex-col.h-screen {
-            max-height: 100vh;
-            overflow-y: auto;
-          }
-
-          /* Ensure game board doesn't get too large */
-          .flex.items-center.justify-center.order-1 {
-            max-height: 60vh;
-          }
-
-          /* Make modals more compact */
-          .fixed.inset-0.bg-black\/80 > div {
-            max-height: 90vh;
-            overflow-y: auto;
-          }
-        }
-      `}</style>
+      
     </div>
   );
 }

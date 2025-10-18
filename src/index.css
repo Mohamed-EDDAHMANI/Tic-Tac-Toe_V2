@@ -1,3 +1,121 @@
 @import "tailwindcss";
 
-/* Custom styles can go here */
+/* Custom styles moved from inline component CSS */
+
+@keyframes blob {
+	0%, 100% { transform: translate(0, 0) scale(1); }
+	33% { transform: translate(30px, -50px) scale(1.1); }
+	66% { transform: translate(-20px, 20px) scale(0.9); }
+}
+.animate-blob {
+	animation: blob 7s infinite;
+}
+.animation-delay-2000 { animation-delay: 2s; }
+.animation-delay-4000 { animation-delay: 4s; }
+
+@media (max-width: 640px) {
+	.xs\:inline { display: inline; }
+}
+
+/* Custom responsive fixes for 801x1014 and 1134x1014 resolutions */
+@media (min-width: 768px) and (max-width: 1200px) {
+	/* Adjust main container padding for medium screens */
+	.relative.z-10.flex.flex-col.h-screen {
+		padding: 0.75rem;
+		gap: 0.625rem;
+	}
+	/* Optimize game board container for medium screens */
+	.flex.items-center.justify-center.order-1 {
+		padding: 0.5rem;
+	}
+	/* Adjust player cards to be more compact */
+	.bg-slate-900\/90.backdrop-blur-xl.border-2.rounded-xl { padding: 0.75rem !important; }
+	/* Make player symbols slightly smaller */
+	.bg-gradient-to-br.rounded-full.flex.items-center.justify-center {
+		width: 3.5rem !important;
+		height: 3.5rem !important;
+		font-size: 1.75rem !important;
+	}
+	/* Adjust player input fields */
+	input[type="text"] { font-size: 0.875rem; padding: 0.5rem; }
+	/* Optimize score display */
+	.text-center.flex-1.bg-slate-800\/30.rounded-lg { padding: 0.5rem; }
+	/* Adjust header padding */
+	header { padding: 0.625rem !important; }
+	/* Optimize button sizes */
+	button { font-size: 0.875rem; }
+}
+
+/* Specific fix for 801x1014 (portrait tablet) */
+@media (min-width: 768px) and (max-width: 850px) and (min-height: 1000px) {
+	/* Force single column layout for game area */
+	.flex-1.flex.flex-col.md\:grid {
+		display: flex !important;
+		flex-direction: column !important;
+	}
+	/* Maximize board space */
+	.flex.items-center.justify-center.order-1 > div {
+		max-width: min(92vw, 480px) !important;
+		max-height: min(92vw, 480px) !important;
+	}
+	/* Compact player cards horizontally */
+	.bg-slate-900\/90.backdrop-blur-xl.border-2 > div {
+		flex-direction: row !important;
+		gap: 1rem !important;
+	}
+	/* Reduce overall padding */
+	.relative.z-10.flex.flex-col.h-screen { padding: 0.5rem; gap: 0.5rem; }
+}
+
+/* Specific fix for 1134x1014 (landscape tablet) */
+@media (min-width: 1100px) and (max-width: 1200px) and (max-height: 1100px) {
+	/* Optimize grid layout */
+	.flex-1.flex.flex-col.md\:grid.lg\:grid-cols-\[minmax\(200px\,1fr\)_auto_minmax\(200px\,1fr\)\] {
+		grid-template-columns: minmax(150px, 0.9fr) auto minmax(150px, 0.9fr) !important;
+		gap: 0.75rem !important;
+	}
+	/* Adjust board size for landscape */
+	.flex.items-center.justify-center.order-1 > div {
+		max-width: min(50vw, 600px) !important;
+		max-height: min(65vh, 600px) !important;
+	}
+	/* Compact player cards */
+	.bg-slate-900\/90.backdrop-blur-xl.border-2 { padding: 1rem !important; }
+	/* Reduce player symbol size */
+	.bg-gradient-to-br.rounded-full.flex.items-center.justify-center {
+		width: 3.25rem !important;
+		height: 3.25rem !important;
+		font-size: 1.5rem !important;
+	}
+	/* Optimize vertical spacing */
+	.relative.z-10.flex.flex-col.h-screen { padding: 0.625rem; gap: 0.5rem; }
+	/* Compact header */
+	header { padding: 0.5rem !important; }
+	header h1 { font-size: 1.125rem !important; }
+	/* Smaller buttons */
+	header button { padding: 0.5rem 0.75rem; font-size: 0.813rem; }
+	/* Compact footer */
+	footer,
+	.bg-slate-900\/90.backdrop-blur-xl.border.border-purple-500\/40.rounded-xl:last-child { padding: 0.5rem !important; }
+}
+
+/* General optimization for medium screens */
+@media (min-width: 768px) and (max-width: 1024px) {
+	/* Ensure game status bar is compact */
+	.bg-slate-900\/90.backdrop-blur-xl.border.border-purple-500\/40.rounded-xl { padding: 0.625rem !important; }
+	/* Optimize cell sizes for different grid sizes */
+	.bg-slate-800\/70.backdrop-blur-sm.border { font-size: clamp(0.875rem, 2vw, 1.5rem); }
+}
+
+/* Fix for very specific resolutions to prevent overflow */
+@media (min-width: 768px) and (max-width: 1200px) and (max-height: 1100px) {
+	/* Prevent main container from overflowing */
+	.relative.z-10.flex.flex-col.h-screen {
+		max-height: 100vh;
+		overflow-y: auto;
+	}
+	/* Ensure game board doesn't get too large */
+	.flex.items-center.justify-center.order-1 { max-height: 60vh; }
+	/* Make modals more compact */
+	.fixed.inset-0.bg-black\/80 > div { max-height: 90vh; overflow-y: auto; }
+}

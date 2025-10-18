@@ -24,6 +24,8 @@ Advanced AI implementation with three difficulty levels:
 - **Win Condition**: Set how many symbols in a row are needed to win (3 to grid size)
 - **Custom Symbols**: Select from various symbols (X, O, ★, ♦, ●, ■, 🔥, ⚡, 💎, 🚀, etc.)
 - **Player Names**: Customize player names with persistent storage
+ - **Starting Player**: Choose Player 1, Player 2, Alternate each game, or Random
+ - **Vs AI: Your Side**: Pick whether you play as Player 1 or Player 2
 
 ### 📊 Statistics Tracking
 - **Score Tracking**: Keep track of wins for both players
@@ -207,7 +209,7 @@ Processes draw conditions:
 #### `newGame()`
 Resets the game state:
 - Initializes new board
-- Resets to player 1
+- Sets starter based on configuration (Player 1, Player 2, Alternate, or Random)
 - Clears game over flags
 - Hides modals
 - Stops AI thinking
