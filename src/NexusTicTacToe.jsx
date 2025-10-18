@@ -855,11 +855,14 @@ export default function NexusTicTacToe() {
         </div>
 
         {/* Footer */}
-        <div className={`backdrop-blur-xl border rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-2xl flex justify-center transition-all ${
+        <div className={`backdrop-blur-xl border rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4 transition-all ${
           theme === 'dark'
             ? 'bg-slate-900/90 border-purple-500/40 shadow-purple-500/30'
             : 'bg-white/90 border-purple-300/60 shadow-purple-300/40'
         }`}>
+          <div className={`text-xs sm:text-sm font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+            Made with 💜 by <span className="font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">EDDAHMANI Mohamed</span>
+          </div>
           <button
             onClick={resetScores}
             className="px-3 sm:px-6 py-1.5 sm:py-2.5 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-lg sm:rounded-xl text-xs sm:text-base font-semibold hover:shadow-lg hover:shadow-red-500/50 hover:scale-105 transition-all flex items-center gap-1.5 sm:gap-2 text-white"
